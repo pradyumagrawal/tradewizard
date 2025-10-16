@@ -1,3 +1,1 @@
 # tradewizard
-<br>
-pradyum agrawal
