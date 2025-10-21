@@ -191,7 +191,7 @@ def plot_results(df: pd.DataFrame, y_test: pd.Series, y_pred_test: np.ndarray, f
 # ------------------------
 # UI
 # ------------------------
-st.title("📈 Stock Price Forecast (yfinance + ML)")
+st.title("📈 TradeWizard (Your Trading Companion)")
 
 with st.sidebar:
     st.header("Settings")
