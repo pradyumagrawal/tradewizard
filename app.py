@@ -1,6 +1,3 @@
-# app.py
-# Streamlit Stock Forecast App using yfinance, pandas, matplotlib, and scikit-learn
-# Save as app.py, then run: streamlit run app.py
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -17,10 +14,7 @@ from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
 st.set_page_config(page_title="TradeWizard", page_icon="📈", layout="wide")
-
-# ------------------------
 # Utilities
-# ------------------------
 @st.cache_data(show_spinner=False, ttl=3600)
 def fetch_prices(ticker: str, start: pd.Timestamp, end: pd.Timestamp, interval: str) -> pd.DataFrame:
     df = yf.download(
@@ -192,7 +186,6 @@ def plot_results(df: pd.DataFrame, y_test: pd.Series, y_pred_test: np.ndarray, f
 # UI
 # ------------------------
 st.title("📈 TradeWizard (Your Trading Companion)")
-
 with st.sidebar:
     st.header("Settings")
     ticker = st.text_input("Ticker", value="AAPL")
