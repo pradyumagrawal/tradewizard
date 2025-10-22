@@ -1,4 +1,3 @@
-
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -12,33 +11,50 @@ import yfinance as yf
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+import traceback
+
+# Remove the problematic cache clearing code
+# if 'st' in globals():
+#     st.cache_data.clear()
+
+# Instead, initialize session state if needed
+if 'init' not in st.session_state:
+    st.session_state.init = True
+    try:
+        st.cache_data.clear()
+    except:
+        pass
 
 st.set_page_config(page_title="TradeWizard", page_icon="📈", layout="wide")
 # Utilities
-@st.cache_data(show_spinner=False, ttl=3600)
+@st.cache_data(ttl=3600)
 def fetch_prices(ticker: str, start: pd.Timestamp, end: pd.Timestamp, interval: str) -> pd.DataFrame:
-    df = yf.download(
-        tickers=ticker,
-        start=start,
-        end=end,
-        interval=interval,
-        auto_adjust=True,
-        progress=False,
-        threads=True
-    )
-    if isinstance(df.columns, pd.MultiIndex):
-        # In case of multi-index columns, keep Close and Volume
-        df = df[['Close', 'Volume']].copy()
-    else:
-        df = df[['Close', 'Volume']].copy()
-    df = df.dropna().copy()
-    return df
+    try:
+        df = yf.download(
+            tickers=ticker,
+            start=start,
+            end=end,
+            interval=interval,
+            auto_adjust=True,
+            progress=False,
+            threads=True
+        )
+        if df.empty:
+            raise ValueError(f"No data found for ticker {ticker}")
+            
+        if isinstance(df.columns, pd.MultiIndex):
+            df = df[['Close', 'Volume']].copy()
+        else:
+            df = df[['Close', 'Volume']].copy()
+        return df.dropna().copy()
+    except Exception as e:
+        raise ValueError(f"Failed to fetch data for {ticker}: {str(e)}")
 
 def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
 
     # Simple moving averages
-    out['sma_5']  = out['Close'].rolling(window=5, min_periods=5).mean()
+    out['sma_5' ] = out['Close'].rolling(window=5, min_periods=5).mean()
     out['sma_10'] = out['Close'].rolling(window=10, min_periods=10).mean()
     out['sma_20'] = out['Close'].rolling(window=20, min_periods=20).mean()
 
@@ -47,9 +63,9 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     out['ema_26'] = out['Close'].ewm(span=26, adjust=False, min_periods=26).mean()
 
     # MACD (12,26,9)
-    out['macd']        = out['ema_12'] - out['ema_26']
+    out['macd'       ] = out['ema_12'] - out['ema_26']
     out['macd_signal'] = out['macd'].ewm(span=9, adjust=False, min_periods=9).mean()
-    out['macd_hist']   = out['macd'] - out['macd_signal']
+    out['macd_hist'  ] = out['macd'] - out['macd_signal']
 
     # RSI(14)
     out['rsi_14'] = rsi(out['Close'], window=14)
@@ -62,8 +78,8 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
         out[f'close_lag_{k}'] = out['Close'].shift(k)
 
     # Returns
-    out['ret_1']  = out['Close'].pct_change(1)
-    out['ret_5']  = out['Close'].pct_change(5)
+    out['ret_1' ] = out['Close'].pct_change(1)
+    out['ret_5' ] = out['Close'].pct_change(5)
     out['ret_10'] = out['Close'].pct_change(10)
 
     # Calendar/seasonality
@@ -97,7 +113,12 @@ def make_feature_matrix(df_feat: pd.DataFrame):
     ]
     X = df_feat[feature_cols].copy()
     y = df_feat['Close'].shift(-1).copy()  # predict next-step close
-    data = pd.concat([X, y.rename('target')], axis=1).dropna()
+
+    # Ensure target column exists by assigning into a DataFrame explicitly
+    data = X.copy()
+    data['target'] = y
+    data = data.dropna()
+
     return data.drop(columns=['target']), data['target']
 
 def time_split(X: pd.DataFrame, y: pd.Series, test_size: float = 0.2):
@@ -120,7 +141,8 @@ def choose_model(name: str):
 
 def evaluate(y_true: pd.Series, y_pred: np.ndarray):
     mae = mean_absolute_error(y_true, y_pred)
-    rmse = mean_squared_error(y_true, y_pred, squared=False)
+    mse = mean_squared_error(y_true, y_pred)
+    rmse = float(np.sqrt(mse))
     r2 = r2_score(y_true, y_pred)
     return mae, rmse, r2
 
@@ -129,34 +151,46 @@ def forecast_iterative(df_base: pd.DataFrame, model, horizon: int) -> pd.DataFra
     Iteratively forecasts next-step Close for `horizon` business days by
     appending predictions and recomputing features each step.
     """
+    if horizon < 1:
+        return pd.DataFrame()
+        
     recent = df_base[['Close', 'Volume']].copy()
-    last_volume = recent['Volume'].iloc[-1] if 'Volume' in recent else 0.0
-
+    if recent.empty:
+        return pd.DataFrame()
+        
+    last_volume = recent['Volume'].iloc[-1]
     preds = []
     dates = []
 
-    # Create future business day index
     last_dt = recent.index[-1]
     future_idx = pd.bdate_range(start=last_dt + pd.Timedelta(days=1), periods=horizon)
 
-    for i, ts in enumerate(future_idx):
-        # Build a temp frame including predicted closes so far
-        tmp = recent.copy()
-        # Recompute indicators and features
-        tmp_feat = add_indicators(tmp)
-        X_tmp, _ = make_feature_matrix(tmp_feat)
-        if len(X_tmp) == 0:
+    for ts in future_idx:
+        try:
+            tmp = recent.copy()
+            tmp_feat = add_indicators(tmp)
+            X_tmp, _ = make_feature_matrix(tmp_feat)
+            
+            if len(X_tmp) == 0:
+                break
+                
+            x_last = X_tmp.iloc[[-1]]
+            yhat = float(model.predict(x_last)[0])
+            
+            if not np.isfinite(yhat):
+                break
+                
+            preds.append(yhat)
+            dates.append(ts)
+
+            recent.loc[ts, 'Close'] = yhat
+            recent.loc[ts, 'Volume'] = last_volume
+        except Exception:
             break
-        x_last = X_tmp.iloc[[-1]]  # last row features
-        yhat = float(model.predict(x_last)[0])
 
-        preds.append(yhat)
-        dates.append(ts)
-
-        # Append for next step
-        recent.loc[ts, 'Close'] = yhat
-        recent.loc[ts, 'Volume'] = last_volume  # simple carry-forward
-
+    if not preds:
+        return pd.DataFrame()
+        
     return pd.DataFrame({'Forecast': preds}, index=pd.Index(dates, name='Date'))
 
 def plot_results(df: pd.DataFrame, y_test: pd.Series, y_pred_test: np.ndarray, fcst: pd.DataFrame, split_idx: int):
@@ -188,12 +222,19 @@ def plot_results(df: pd.DataFrame, y_test: pd.Series, y_pred_test: np.ndarray, f
 st.title("📈 TradeWizard (Your Trading Companion)")
 with st.sidebar:
     st.header("Settings")
-    ticker = st.text_input("Ticker", value="AAPL")
+    ticker = st.text_input("Ticker", value="AAPL").strip().upper()
+    if not ticker:
+        st.error("Please enter a valid ticker symbol")
+        st.stop()
     colA, colB = st.columns(2)
     with colA:
         start_date = st.date_input("Start date", value=date.today() - timedelta(days=365*5))
     with colB:
         end_date = st.date_input("End date", value=date.today())
+        
+    if start_date >= end_date:
+        st.error("Start date must be before end date")
+        st.stop()
 
     interval = st.selectbox("Interval", options=["1d", "1h", "30m", "15m"], index=0)
     model_name = st.selectbox("Model", options=["Random Forest", "Linear Regression"], index=0)
@@ -222,8 +263,16 @@ if run_btn:
         split_idx = len(X_train)
 
         # Train
+        if len(X_train) < 50:  # Minimum required samples
+            st.error("Not enough training data. Please extend the date range.")
+            st.stop()
+        
         model = choose_model(model_name)
-        model.fit(X_train, y_train)
+        try:
+            model.fit(X_train, y_train)
+        except Exception as e:
+            st.error(f"Model training failed: {str(e)}")
+            st.stop()
 
         # Backtest
         y_pred_test = model.predict(X_test)
@@ -260,5 +309,7 @@ if run_btn:
                     mime="text/csv",
                 )
     except Exception as e:
-        st.error(f"Error: {e}")
+        st.error("An error occurred — full traceback below:")
+        st.exception(e)
+        st.text(traceback.format_exc())
 
