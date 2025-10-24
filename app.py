@@ -267,6 +267,10 @@ def forecast_iterative_adaptive(df_base: pd.DataFrame, model_template, X_history
     if X_all.empty and retrain is False:
         return pd.DataFrame()
 
+    # Historical volatility scalar used for optional small randomness
+    recent_returns = df_base['Close'].pct_change().tail(20)
+    hist_volatility = float(recent_returns.std()) if not recent_returns.empty else 0.0
+
     # Setup for non-retrain fast path
     if not retrain:
         scaler = StandardScaler()
@@ -296,8 +300,7 @@ def forecast_iterative_adaptive(df_base: pd.DataFrame, model_template, X_history
 
             # update returns if present
             if 'ret_1' in X_all.columns:
-                # ret_1 for the new row = (predicted / current_close) - 1 -> placeholder using current_close until we predict
-                new_vals['ret_1'] = 0.0  # will be updated after prediction
+                new_vals['ret_1'] = 0.0  # placeholder, updated after prediction
             if 'ret_5' in X_all.columns:
                 new_vals['ret_5'] = last_row_vals.get('ret_4', last_row_vals.get('ret_5', 0.0)) if 'ret_4' in last_row_vals else last_row_vals.get('ret_5', 0.0)
             if 'ret_10' in X_all.columns:
@@ -321,17 +324,19 @@ def forecast_iterative_adaptive(df_base: pd.DataFrame, model_template, X_history
 
             try:
                 x_scaled = scaler.transform(x_vec)
-                yhat = float(mdl.predict(x_scaled)[0])
-                
-                # Add small random variations based on historical volatility
-                random_factor = np.random.normal(0, hist_volatility * 0.5)
-                yhat = base_pred * (1 + random_factor)
+                base_pred = float(mdl.predict(x_scaled)[0])
+                # Optional: add small random variation proportional to recent volatility
+                if hist_volatility > 0.0:
+                    random_factor = np.random.normal(0, hist_volatility * 0.5)
+                    yhat = base_pred * (1 + random_factor)
+                else:
+                    yhat = base_pred
             except Exception:
                 break
 
             # update ret_1 properly now
             if 'ret_1' in x_vec.columns:
-                x_vec.at[0, 'ret_1'] = (yhat / current_close) - 1.0
+                x_vec.at[0, 'ret_1'] = (yhat / current_close) - 1.0 if current_close != 0 else 0.0
 
             preds.append(yhat)
             dates.append(ts)
