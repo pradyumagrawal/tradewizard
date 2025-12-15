@@ -1,0 +1,5 @@
+{
+  "rewrites": [
+    { "app.py": "/(.*)", "streamlit run app.py": "/" }
+  ]
+}
