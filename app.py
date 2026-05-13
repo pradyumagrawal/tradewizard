@@ -16,11 +16,7 @@ from sklearn.base import clone
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 import traceback
 
-# Remove the problematic cache clearing code
-# if 'st' in globals():
-#     st.cache_data.clear()
 
-# Instead, initialize session state if needed
 if 'init' not in st.session_state:
     st.session_state.init = True
     try:
@@ -29,7 +25,7 @@ if 'init' not in st.session_state:
         pass
 
 st.set_page_config(page_title="TradeWizard", page_icon="📈", layout="wide")
-# Utilities
+
 @st.cache_data(ttl=3600)
 def fetch_prices(ticker: str, start: pd.Timestamp, end: pd.Timestamp, interval: str) -> pd.DataFrame:
     try:
@@ -48,7 +44,7 @@ def fetch_prices(ticker: str, start: pd.Timestamp, end: pd.Timestamp, interval: 
         if isinstance(df.columns, pd.MultiIndex):
             df = df[['Open', 'High', 'Low', 'Close', 'Volume']].copy()
         else:
-            # Keep all available columns
+            
             keep_cols = [col for col in ['Open', 'High', 'Low', 'Close', 'Volume'] if col in df.columns]
             df = df[keep_cols].copy()
         return df.dropna().copy()
@@ -58,58 +54,58 @@ def fetch_prices(ticker: str, start: pd.Timestamp, end: pd.Timestamp, interval: 
 def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
 
-    # Simple moving averages
+    
     out['sma_5' ] = out['Close'].rolling(window=5, min_periods=5).mean()
     out['sma_10'] = out['Close'].rolling(window=10, min_periods=10).mean()
     out['sma_20'] = out['Close'].rolling(window=20, min_periods=20).mean()
     out['sma_50'] = out['Close'].rolling(window=50, min_periods=20).mean()
 
-    # Exponential moving averages
+    
     out['ema_12'] = out['Close'].ewm(span=12, adjust=False, min_periods=12).mean()
     out['ema_26'] = out['Close'].ewm(span=26, adjust=False, min_periods=26).mean()
     out['ema_50'] = out['Close'].ewm(span=50, adjust=False, min_periods=50).mean()
     out['ema_100'] = out['Close'].ewm(span=100, adjust=False, min_periods=100).mean()
 
-    # MACD (12,26,9)
+   
     out['macd'       ] = out['ema_12'] - out['ema_26']
     out['macd_signal'] = out['macd'].ewm(span=9, adjust=False, min_periods=9).mean()
     out['macd_hist'  ] = out['macd'] - out['macd_signal']
 
-    # RSI(14)
+    
     out['rsi_14'] = rsi(out['Close'], window=14)
 
-    # Volatility proxy
+    
     out['rolling_std_10'] = out['Close'].pct_change().rolling(10, min_periods=10).std()
     out['rolling_std_20'] = out['Close'].pct_change().rolling(20, min_periods=10).std()
 
-    # Rolling mean momentum
+    
     out['roll_mean_20'] = out['Close'].rolling(20, min_periods=10).mean()
     out['roll_mean_50'] = out['Close'].rolling(50, min_periods=20).mean()
 
-    # Lags of close
+   
     for k in range(1, 6):
         out[f'close_lag_{k}'] = out['Close'].shift(k)
 
-    # Returns
+    
     out['ret_1' ] = out['Close'].pct_change(1)
     out['ret_5' ] = out['Close'].pct_change(5)
     out['ret_10'] = out['Close'].pct_change(10)
 
-    # Price trend features
+    
     out['price_momentum'] = out['Close'].pct_change(5)
     out['price_acceleration'] = out['price_momentum'].diff(1)
     
-    # Volatility features
+    
     out['volatility'] = out['Close'].pct_change().rolling(window=20).std()
     out['high_vol'] = (out['volatility'] > out['volatility'].rolling(window=50).mean()).astype(int)
     
-    # Add range-based features only if High/Low available
+    
     if 'High' in out.columns and 'Low' in out.columns:
         out['daily_range'] = (out['High'] - out['Low']) / out['Close']
         out['range_ma'] = out['daily_range'].rolling(window=10).mean()
 
-    # Calendar/seasonality
-    out['dow'] = out.index.dayofweek  # 0=Mon
+    
+    out['dow'] = out.index.dayofweek  
     out['dayofmonth'] = out.index.day
     out['dayofyear'] = out.index.dayofyear
     out['weekofyear'] = out.index.isocalendar().week.astype(int)
@@ -123,7 +119,7 @@ def rsi(close: pd.Series, window: int = 14) -> pd.Series:
     gain = delta.clip(lower=0.0)
     loss = -delta.clip(upper=0.0)
 
-    # Use Wilder's smoothing via ewm with alpha=1/window (adjust=False)
+    
     avg_gain = gain.ewm(alpha=1/window, min_periods=window, adjust=False).mean()
     avg_loss = loss.ewm(alpha=1/window, min_periods=window, adjust=False).mean()
 
@@ -143,13 +139,13 @@ def make_feature_matrix(df_feat: pd.DataFrame):
         'ret_1','ret_5','ret_10',
         'Volume','dow','dayofmonth','dayofyear','weekofyear','month','is_month_end'
     ]
-    # Keep only features that exist in the DataFrame
+    
     feature_cols = [c for c in feature_cols if c in df_feat.columns]
 
     X = df_feat[feature_cols].copy()
-    y = df_feat['Close'].shift(-1).copy()  # predict next-step close
+    y = df_feat['Close'].shift(-1).copy()  
 
-    # Ensure target column exists by assigning into a DataFrame explicitly
+    
     data = X.copy()
     data['target'] = y
     data = data.dropna()
@@ -167,8 +163,8 @@ def choose_model(name: str):
     if name == "Random Forest":
         return RandomForestRegressor(
             n_estimators=200,
-            max_depth=8,  # Set specific depth to capture more patterns
-            min_samples_leaf=5,  # Allow smaller leaf sizes
+            max_depth=8,  
+            min_samples_leaf=5, 
             random_state=42,
             n_jobs=-1
         )
@@ -178,7 +174,7 @@ def choose_model(name: str):
             learning_rate=0.05,
             max_depth=4,
             min_samples_leaf=3,
-            subsample=0.8,  # Add randomness
+            subsample=0.8,  
             random_state=42
         )
     else:
@@ -259,7 +255,7 @@ def forecast_iterative_adaptive(df_base: pd.DataFrame, model_template, X_history
     last_dt = recent.index[-1]
     future_idx = pd.bdate_range(start=last_dt + pd.Timedelta(days=1), periods=horizon)
 
-    # Precompute full features once (used for base feature set)
+    
     try:
         X_all, _ = make_feature_matrix(add_indicators(df_base))
     except Exception:
@@ -267,30 +263,30 @@ def forecast_iterative_adaptive(df_base: pd.DataFrame, model_template, X_history
     if X_all.empty and retrain is False:
         return pd.DataFrame()
 
-    # Historical volatility scalar used for optional small randomness
+    
     recent_returns = df_base['Close'].pct_change().tail(20)
     hist_volatility = float(recent_returns.std()) if not recent_returns.empty else 0.0
 
-    # Setup for non-retrain fast path
+    
     if not retrain:
         scaler = StandardScaler()
         try:
-            scaler.fit(X_history)  # fit once
+            scaler.fit(X_history) 
         except Exception:
             return pd.DataFrame()
-        mdl = model_template  # assume already trained outside
-        # current_close tracks the latest observed/predicted close
+        mdl = model_template 
+        
         current_close = recent['Close'].iloc[-1]
-        # cache last row as dict for fast updates
+        
         if not X_all.empty:
             last_row_vals = X_all.iloc[-1].to_dict()
         else:
             last_row_vals = {}
 
         for ts in future_idx:
-            # build feature vector quickly by shifting lag features
+            
             new_vals = last_row_vals.copy()
-            # update close lags: close_lag_1 is previous close (current_close)
+            
             if 'close_lag_1' in X_all.columns:
                 new_vals['close_lag_5'] = last_row_vals.get('close_lag_4', last_row_vals.get('close_lag_5', np.nan))
                 new_vals['close_lag_4'] = last_row_vals.get('close_lag_3', last_row_vals.get('close_lag_4', np.nan))
@@ -298,7 +294,6 @@ def forecast_iterative_adaptive(df_base: pd.DataFrame, model_template, X_history
                 new_vals['close_lag_2'] = last_row_vals.get('close_lag_1', last_row_vals.get('close_lag_2', np.nan))
                 new_vals['close_lag_1'] = current_close
 
-            # update returns if present
             if 'ret_1' in X_all.columns:
                 new_vals['ret_1'] = 0.0  # placeholder, updated after prediction
             if 'ret_5' in X_all.columns:
@@ -306,7 +301,6 @@ def forecast_iterative_adaptive(df_base: pd.DataFrame, model_template, X_history
             if 'ret_10' in X_all.columns:
                 new_vals['ret_10'] = last_row_vals.get('ret_10', 0.0)
 
-            # update calendar features
             if 'dow' in X_all.columns:
                 new_vals['dow'] = ts.dayofweek
             if 'dayofmonth' in X_all.columns:
@@ -325,7 +319,7 @@ def forecast_iterative_adaptive(df_base: pd.DataFrame, model_template, X_history
             try:
                 x_scaled = scaler.transform(x_vec)
                 base_pred = float(mdl.predict(x_scaled)[0])
-                # Optional: add small random variation proportional to recent volatility
+               
                 if hist_volatility > 0.0:
                     random_factor = np.random.normal(0, hist_volatility * 0.5)
                     yhat = base_pred * (1 + random_factor)
@@ -334,14 +328,12 @@ def forecast_iterative_adaptive(df_base: pd.DataFrame, model_template, X_history
             except Exception:
                 break
 
-            # update ret_1 properly now
             if 'ret_1' in x_vec.columns:
                 x_vec.at[0, 'ret_1'] = (yhat / current_close) - 1.0 if current_close != 0 else 0.0
 
             preds.append(yhat)
             dates.append(ts)
 
-            # update trackers for next iteration
             current_close = yhat
             last_row_vals = x_vec.iloc[0].to_dict()
             last_row_vals['close_lag_1'] = current_close
@@ -350,13 +342,13 @@ def forecast_iterative_adaptive(df_base: pd.DataFrame, model_template, X_history
             return pd.DataFrame()
         return pd.DataFrame({'Forecast': preds}, index=pd.Index(dates, name='Date'))
 
-    # Retrain path (faster: retrain only every retrain_every steps and compute indicators on rolling window)
+   
     mdl = None
     scaler = None
     step = 0
     for ts in future_idx:
         step += 1
-        # recompute indicators on a small rolling slice (window + a few extra)
+     
         tail_rows = int(min(len(recent), max(window, 60)))
         tmp = recent.tail(tail_rows).copy()
         tmp_feat = add_indicators(tmp)
@@ -364,14 +356,14 @@ def forecast_iterative_adaptive(df_base: pd.DataFrame, model_template, X_history
         if len(X_tmp) < 10:
             break
 
-        # choose recent training slice (within window)
+      
         X_train_slice = X_tmp.copy()
         y_train_slice = y_tmp.copy()
         if len(X_train_slice) > window:
             X_train_slice = X_train_slice.iloc[-window:]
             y_train_slice = y_train_slice.iloc[-window:]
 
-        # retrain only every `retrain_every` steps (and always retrain at step 1)
+        
         if (mdl is None) or (step % max(1, retrain_every) == 1):
             scaler = StandardScaler()
             try:
@@ -384,7 +376,7 @@ def forecast_iterative_adaptive(df_base: pd.DataFrame, model_template, X_history
             except Exception:
                 break
 
-        # predict using the last computed features
+      
         x_last = X_tmp.iloc[[-1]].copy()
         try:
             x_last_scaled = scaler.transform(x_last)
@@ -395,7 +387,7 @@ def forecast_iterative_adaptive(df_base: pd.DataFrame, model_template, X_history
         preds.append(yhat)
         dates.append(ts)
 
-        # append predicted point so next iteration uses updated lags/indicators
+       
         recent.loc[ts, 'Close'] = yhat
         recent.loc[ts, 'Volume'] = last_volume
 
@@ -408,31 +400,31 @@ def plot_results(df: pd.DataFrame, y_test: pd.Series, y_pred_test: np.ndarray, f
     fig, ax = plt.subplots(figsize=(12, 5))
     ax.plot(df.index, df['Close'], label='Close', color='tab:blue', linewidth=1.5)
 
-    # Backtest region
+   
     test_index = y_test.index
     ax.plot(test_index, y_pred_test, label='Backtest Pred', color='tab:orange', linewidth=1.5)
 
-    # Forecast region with confidence intervals
+    
     if fcst is not None and len(fcst) > 0:
-        # Calculate historical volatility from recent data
-        recent_returns = df['Close'].pct_change().tail(20)
-        hist_vol = float(recent_returns.std())  # Convert to scalar
-        base_price = float(df['Close'].iloc[-1])  # Convert to scalar
         
-        # Calculate confidence intervals for each forecast step
+        recent_returns = df['Close'].pct_change().tail(20)
+        hist_vol = float(recent_returns.std())  
+        base_price = float(df['Close'].iloc[-1])  
+        
+       
         n_steps = len(fcst)
         conf_multiplier = np.sqrt(np.arange(1, n_steps + 1))
         conf_width = hist_vol * base_price * conf_multiplier
         
-        # Ensure arrays are properly aligned
+    
         upper = fcst['Forecast'].values + conf_width
         lower = fcst['Forecast'].values - conf_width
         
-        # Plot forecast and confidence interval
+        
         ax.fill_between(fcst.index, lower, upper, color='tab:green', alpha=0.1, label='95% Confidence')
         ax.plot(fcst.index, fcst['Forecast'], label='Forecast', color='tab:green', linestyle='--', linewidth=1.8)
 
-    # Split marker
+  
     if split_idx is not None:
         ax.axvline(df.index[split_idx], color='gray', linestyle=':', linewidth=1)
 
@@ -443,10 +435,8 @@ def plot_results(df: pd.DataFrame, y_test: pd.Series, y_pred_test: np.ndarray, f
     ax.legend()
     st.pyplot(fig, use_container_width=True)
 
-# ------------------------
-# UI
-# ------------------------
-st.title("📈 TradeWizard (Your Trading Companion)")
+
+st.title(" TradeWizard (Your Trading Companion)")
 with st.sidebar:
     st.header("Settings")
     ticker = st.text_input("Ticker", value="AAPL").strip().upper()
@@ -468,7 +458,6 @@ with st.sidebar:
     test_size = st.slider("Test size (holdout %)", min_value=0.05, max_value=0.5, value=0.2, step=0.05)
     horizon = st.slider("Forecast horizon (business days)", min_value=1, max_value=60, value=10, step=1)
 
-    # adaptive forecasting settings
     retrain = st.checkbox("Adaptive retrain during forecasting (recommended)", value=True)
     window_size = st.slider("Retrain window (days)", min_value=50, max_value=2000, value=252, step=1)
 
